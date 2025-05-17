@@ -3,3 +3,6 @@ venv/
 tmp/
 output/
 whisper/
+.venv-whisper
+whisper-main/
+whisper/
