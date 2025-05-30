@@ -4,6 +4,7 @@ import os
 import argparse
 import subprocess
 from pathlib import Path
+import time
 
 def transcriptions_to_srt(segments, srt_file):
     """
@@ -49,6 +50,9 @@ def wav_to_subtitles(media_file, output_dir="output", generate_txt=False):
         output_dir (str): Directory for output files.
         generate_txt (bool): If True, generate plain text file.
     """
+    # Start timing
+    start_time = time.time()
+
     if not os.path.exists(media_file):
         raise FileNotFoundError(f"Input file {media_file} not found")
 
@@ -96,6 +100,10 @@ def wav_to_subtitles(media_file, output_dir="output", generate_txt=False):
     # Clean up temp
     if temp_wav and os.path.exists(temp_wav):
         os.remove(temp_wav)
+
+    # Calculate and print elapsed time
+    elapsed_time = time.time() - start_time
+    print(f"Conversion completed in {elapsed_time:.2f} seconds.")
 
     print(f"Done. SRT saved to {srt_file}")
     if generate_txt:
