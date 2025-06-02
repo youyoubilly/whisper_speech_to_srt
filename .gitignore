@@ -6,3 +6,5 @@ whisper/
 .venv-whisper
 whisper-main/
 whisper/
+.venv_stt/
+.ipynb_checkpoints/
