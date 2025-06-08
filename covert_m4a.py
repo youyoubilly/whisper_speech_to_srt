@@ -16,11 +16,6 @@ def convert_m4a(input_file, output_format="mp3"):
         return
     
     try:
-        # Explicitly set ffmpeg paths (adjust if needed for your system)
-        AudioSegment.converter = "/opt/homebrew/bin/ffmpeg"
-        AudioSegment.ffmpeg = "/opt/homebrew/bin/ffmpeg"
-        AudioSegment.ffprobe = "/opt/homebrew/bin/ffprobe"
-        
         # Load M4A file with explicit codec
         audio = AudioSegment.from_file(input_file, format="m4a", codec="aac")
         
@@ -46,7 +41,7 @@ def convert_m4a(input_file, output_format="mp3"):
         # Run ffmpeg directly for debugging
         import subprocess
         result = subprocess.run(
-            ["/opt/homebrew/bin/ffmpeg", "-i", input_file, "-f", "null", "-"],
+            ["ffmpeg", "-i", input_file, "-f", "null", "-"],
             capture_output=True, text=True
         )
         print("ffmpeg stderr:", result.stderr)
