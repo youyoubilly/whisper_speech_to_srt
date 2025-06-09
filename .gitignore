@@ -8,3 +8,4 @@ whisper-main/
 whisper/
 .venv_stt/
 .ipynb_checkpoints/
+.DS_Store

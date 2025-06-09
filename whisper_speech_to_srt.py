@@ -41,13 +41,13 @@ def convert_to_wav(input_file, wav_path):
     ]
     subprocess.run(cmd, check=True)
 
-def wav_to_subtitles(media_file, output_dir="output", generate_txt=False):
+def wav_to_subtitles(media_file, output_dir=None, generate_txt=False):
     """
     Convert media file to SRT (and optionally TXT) using Whisper.
 
     Args:
         media_file (str): Path to input media (WAV, M4A, MP3, MP4).
-        output_dir (str): Directory for output files.
+        output_dir (str, optional): Directory for output files. If None, use input file's directory.
         generate_txt (bool): If True, generate plain text file.
     """
     # Start timing
@@ -61,17 +61,22 @@ def wav_to_subtitles(media_file, output_dir="output", generate_txt=False):
     valid_audio = {'.wav', '.m4a', '.mp3'}
     temp_wav = None
 
+    # Determine output directory
+    if output_dir is None:
+        output_dir = Path(media_file).parent
+    else:
+        output_dir = Path(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+
     if ext == '.mp4':
         # Convert MP4 to WAV first
         base = Path(media_file).stem
-        temp_wav = os.path.join(Path(output_dir), f"{base}_temp.wav")
-        os.makedirs(output_dir, exist_ok=True)
+        temp_wav = os.path.join(output_dir, f"{base}_temp.wav")
         print(f"Converting {media_file} to WAV...")
         convert_to_wav(media_file, temp_wav)
         audio_path = temp_wav
     elif ext in valid_audio:
         audio_path = media_file
-        os.makedirs(output_dir, exist_ok=True)
     else:
         raise ValueError(f"Unsupported file type: {ext}. Supported: WAV, M4A, MP3, MP4.")
 
@@ -82,7 +87,10 @@ def wav_to_subtitles(media_file, output_dir="output", generate_txt=False):
 
     # Load Whisper
     print("Loading Whisper model...")
-    model = whisper.load_model("base")  # tiny, base, small, medium, large
+    import ssl
+    import urllib.request
+    ssl._create_default_https_context = ssl._create_unverified_context
+    model = whisper.load_model("base")
 
     # Transcribe
     print(f"Transcribing {audio_path}...")
@@ -124,8 +132,10 @@ def main():
     )
     parser.add_argument(
         '-o', '--output',
-        default='output',
-        help='Directory for output files'
+        nargs='?',
+        const='output',
+        default=None,
+        help='Directory for output files (default: same as input file; use -o for ./output)'
     )
     args = parser.parse_args()
 
