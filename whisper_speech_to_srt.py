@@ -41,7 +41,7 @@ def convert_to_wav(input_file, wav_path):
     ]
     subprocess.run(cmd, check=True)
 
-def wav_to_subtitles(media_file, output_dir=None, generate_txt=False):
+def wav_to_subtitles(media_file, output_dir=None, generate_txt=False, model_name="base"):
     """
     Convert media file to SRT (and optionally TXT) using Whisper.
 
@@ -49,6 +49,7 @@ def wav_to_subtitles(media_file, output_dir=None, generate_txt=False):
         media_file (str): Path to input media (WAV, M4A, MP3, MP4).
         output_dir (str, optional): Directory for output files. If None, use input file's directory.
         generate_txt (bool): If True, generate plain text file.
+        model_name (str): Whisper model to use (default: "base").
     """
     # Start timing
     start_time = time.time()
@@ -86,11 +87,11 @@ def wav_to_subtitles(media_file, output_dir=None, generate_txt=False):
     txt_file = os.path.join(output_dir, f"{base_name}.txt")
 
     # Load Whisper
-    print("Loading Whisper model...")
+    print(f"Loading Whisper model ({model_name})...")
     import ssl
     import urllib.request
     ssl._create_default_https_context = ssl._create_unverified_context
-    model = whisper.load_model("base")
+    model = whisper.load_model(model_name)
 
     # Transcribe
     print(f"Transcribing {audio_path}...")
@@ -137,12 +138,20 @@ def main():
         default=None,
         help='Directory for output files (default: same as input file; use -o for ./output)'
     )
+    parser.add_argument(
+        '--large-v3',
+        action='store_true',
+        help='Use large-v3 model instead of base model'
+    )
     args = parser.parse_args()
 
+    model_name = "large-v3" if args.large_v3 else "base"
+    
     wav_to_subtitles(
         args.media_file,
         output_dir=args.output,
-        generate_txt=args.text
+        generate_txt=args.text,
+        model_name=model_name
     )
 
 if __name__ == '__main__':
