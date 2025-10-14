@@ -45,15 +45,18 @@ def find_audio_files(directory, recursive=False):
     directory_path = Path(directory)
     
     if recursive:
-        # Recursively find all audio files
+        # Recursively find all audio files (case-insensitive)
         for ext in supported_extensions:
             audio_files.extend(directory_path.rglob(f"*{ext}"))
+            audio_files.extend(directory_path.rglob(f"*{ext.upper()}"))
     else:
-        # Only search immediate directory
+        # Only search immediate directory (case-insensitive)
         for ext in supported_extensions:
             audio_files.extend(directory_path.glob(f"*{ext}"))
+            audio_files.extend(directory_path.glob(f"*{ext.upper()}"))
     
-    # Sort by path for consistent ordering
+    # Remove duplicates (in case file system is case-insensitive) and sort
+    audio_files = list(set(audio_files))
     return sorted([str(f) for f in audio_files])
 
 def convert_to_wav(input_file, wav_path):
