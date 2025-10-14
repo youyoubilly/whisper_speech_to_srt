@@ -5,6 +5,7 @@ import argparse
 import subprocess
 from pathlib import Path
 import time
+import sys
 
 def transcriptions_to_srt(segments, srt_file):
     """
@@ -26,6 +27,34 @@ def transcriptions_to_txt(segments, txt_file):
     with open(txt_file, 'w', encoding='utf-8') as f:
         for segment in segments:
             f.write(f"{segment['text'].strip()}\n")
+
+def find_audio_files(directory, recursive=False):
+    """
+    Find all supported audio/video files in a directory.
+    
+    Args:
+        directory (str): Path to directory to search.
+        recursive (bool): If True, search subdirectories recursively.
+    
+    Returns:
+        list: List of audio/video file paths.
+    """
+    supported_extensions = {'.wav', '.m4a', '.mp3', '.mp4'}
+    audio_files = []
+    
+    directory_path = Path(directory)
+    
+    if recursive:
+        # Recursively find all audio files
+        for ext in supported_extensions:
+            audio_files.extend(directory_path.rglob(f"*{ext}"))
+    else:
+        # Only search immediate directory
+        for ext in supported_extensions:
+            audio_files.extend(directory_path.glob(f"*{ext}"))
+    
+    # Sort by path for consistent ordering
+    return sorted([str(f) for f in audio_files])
 
 def convert_to_wav(input_file, wav_path):
     """
@@ -124,7 +153,7 @@ def main():
     )
     parser.add_argument(
         'media_file',
-        help='Path to input media file (WAV, M4A, MP3, MP4)'
+        help='Path to input media file or directory (WAV, M4A, MP3, MP4)'
     )
     parser.add_argument(
         '-t', '--text',
@@ -143,16 +172,78 @@ def main():
         action='store_true',
         help='Use large-v3 model instead of base model'
     )
+    parser.add_argument(
+        '-r', '--recursive',
+        action='store_true',
+        help='Process audio files in subdirectories recursively (only applies when input is a directory)'
+    )
     args = parser.parse_args()
 
     model_name = "large-v3" if args.large_v3 else "base"
+    input_path = Path(args.media_file)
     
-    wav_to_subtitles(
-        args.media_file,
-        output_dir=args.output,
-        generate_txt=args.text,
-        model_name=model_name
-    )
+    # Check if input is a file or directory
+    if input_path.is_file():
+        # Single file processing
+        wav_to_subtitles(
+            args.media_file,
+            output_dir=args.output,
+            generate_txt=args.text,
+            model_name=model_name
+        )
+    elif input_path.is_dir():
+        # Directory processing
+        print(f"Scanning directory: {args.media_file}")
+        if args.recursive:
+            print("(including subdirectories)")
+        
+        audio_files = find_audio_files(args.media_file, recursive=args.recursive)
+        
+        if not audio_files:
+            print("No audio files found in the specified directory.")
+            sys.exit(1)
+        
+        # Display list of files to process
+        print(f"\nFound {len(audio_files)} audio file(s):")
+        for i, file in enumerate(audio_files, 1):
+            print(f"  {i}. {file}")
+        
+        # Ask for confirmation
+        print(f"\nAbout to process {len(audio_files)} file(s) using the '{model_name}' model.")
+        response = input("Continue? (y/n): ").strip().lower()
+        
+        if response not in ['y', 'yes']:
+            print("Operation cancelled.")
+            sys.exit(0)
+        
+        # Process each file
+        print("\nStarting batch processing...\n")
+        successful = 0
+        failed = 0
+        
+        for i, audio_file in enumerate(audio_files, 1):
+            print(f"[{i}/{len(audio_files)}] Processing: {audio_file}")
+            try:
+                wav_to_subtitles(
+                    audio_file,
+                    output_dir=args.output,
+                    generate_txt=args.text,
+                    model_name=model_name
+                )
+                successful += 1
+            except Exception as e:
+                print(f"ERROR processing {audio_file}: {e}")
+                failed += 1
+            print()  # Empty line for readability
+        
+        # Summary
+        print(f"Batch processing complete!")
+        print(f"Successfully processed: {successful}")
+        if failed > 0:
+            print(f"Failed: {failed}")
+    else:
+        print(f"Error: '{args.media_file}' is not a valid file or directory.")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
