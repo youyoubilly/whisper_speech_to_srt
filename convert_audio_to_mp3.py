@@ -20,19 +20,25 @@ def convert_to_mp3(input_file):
         return
     
     try:
-        # Load audio file with appropriate format
-        format_map = {
-            '.m4a': 'm4a',
-            '.wav': 'wav',
-            '.mp3': 'mp3',
-            '.aac': 'adts',
-            '.flac': 'flac',
-            '.ogg': 'ogg',
-            '.wma': 'wma'
-        }
-        
-        audio_format = format_map.get(file_ext, file_ext[1:])
-        audio = AudioSegment.from_file(input_file, format=audio_format)
+        # First, try to auto-detect format by letting ffmpeg handle it
+        try:
+            audio = AudioSegment.from_file(input_file)
+            print(f"Auto-detected format successfully")
+        except Exception as auto_detect_error:
+            print(f"Auto-detection failed, trying with file extension hint...")
+            # Fallback: Load audio file with appropriate format based on extension
+            format_map = {
+                '.m4a': 'm4a',
+                '.wav': 'wav',
+                '.mp3': 'mp3',
+                '.aac': 'adts',
+                '.flac': 'flac',
+                '.ogg': 'ogg',
+                '.wma': 'wma'
+            }
+            
+            audio_format = format_map.get(file_ext, file_ext[1:])
+            audio = AudioSegment.from_file(input_file, format=audio_format)
         
         # Prepare output file path
         output_dir = os.path.dirname(input_file)

@@ -28,6 +28,37 @@ def transcriptions_to_txt(segments, txt_file):
         for segment in segments:
             f.write(f"{segment['text'].strip()}\n")
 
+def transcriptions_to_lrc(segments, lrc_file, title=""):
+    """
+    Generate LRC (lyrics) file from Whisper transcription segments.
+    
+    Args:
+        segments (list): List of Whisper transcription segments.
+        lrc_file (str): Path to output LRC file.
+        title (str): Optional title for the LRC metadata.
+    """
+    with open(lrc_file, 'w', encoding='utf-8') as f:
+        # Write LRC metadata headers
+        f.write(f"[ti:{title}]\n")
+        f.write("[ar:]\n")
+        f.write("[al:]\n")
+        f.write("[by:Whisper STT]\n")
+        f.write("[offset:0]\n")
+        f.write("\n")
+        
+        # Write lyrics with timestamps
+        for segment in segments:
+            start_time = segment['start']
+            # Convert to total minutes and seconds
+            total_minutes = int(start_time // 60)
+            total_seconds = int(start_time % 60)
+            # Get centiseconds (hundredths of a second)
+            centiseconds = int((start_time % 1) * 100)
+            
+            # Format as LRC: [MM:SS.xx]text
+            lrc_timestamp = f"[{total_minutes:02d}:{total_seconds:02d}.{centiseconds:02d}]"
+            f.write(f"{lrc_timestamp}{segment['text'].strip()}\n")
+
 def find_audio_files(directory, recursive=False):
     """
     Find all supported audio/video files in a directory.
@@ -73,14 +104,15 @@ def convert_to_wav(input_file, wav_path):
     ]
     subprocess.run(cmd, check=True)
 
-def wav_to_subtitles(media_file, output_dir=None, generate_txt=False, model_name="base"):
+def wav_to_subtitles(media_file, output_dir=None, generate_txt=True, generate_lrc=True, model_name="base"):
     """
-    Convert media file to SRT (and optionally TXT) using Whisper.
+    Convert media file to SRT, TXT, and LRC using Whisper.
 
     Args:
         media_file (str): Path to input media (WAV, M4A, MP3, MP4).
         output_dir (str, optional): Directory for output files. If None, use input file's directory.
-        generate_txt (bool): If True, generate plain text file.
+        generate_txt (bool): If True, generate plain text file (default: True).
+        generate_lrc (bool): If True, generate LRC lyrics file (default: True).
         model_name (str): Whisper model to use (default: "base").
     """
     # Start timing
@@ -117,6 +149,7 @@ def wav_to_subtitles(media_file, output_dir=None, generate_txt=False, model_name
     base_name = Path(media_file).stem
     srt_file = os.path.join(output_dir, f"{base_name}.srt")
     txt_file = os.path.join(output_dir, f"{base_name}.txt")
+    lrc_file = os.path.join(output_dir, f"{base_name}.lrc")
 
     # Load Whisper
     print(f"Loading Whisper model ({model_name})...")
@@ -137,6 +170,11 @@ def wav_to_subtitles(media_file, output_dir=None, generate_txt=False, model_name
     if generate_txt:
         print(f"Writing text to {txt_file}...")
         transcriptions_to_txt(result['segments'], txt_file)
+    
+    # Optional LRC
+    if generate_lrc:
+        print(f"Writing lyrics to {lrc_file}...")
+        transcriptions_to_lrc(result['segments'], lrc_file, title=base_name)
 
     # Clean up temp
     if temp_wav and os.path.exists(temp_wav):
@@ -149,6 +187,8 @@ def wav_to_subtitles(media_file, output_dir=None, generate_txt=False, model_name
     print(f"Done. SRT saved to {srt_file}")
     if generate_txt:
         print(f"Plain text saved to {txt_file}")
+    if generate_lrc:
+        print(f"LRC lyrics saved to {lrc_file}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -161,7 +201,26 @@ def main():
     parser.add_argument(
         '-t', '--text',
         action='store_true',
-        help='Also generate plain text output without timestamps'
+        default=True,
+        help='Generate plain text output (enabled by default, use --no-text to disable)'
+    )
+    parser.add_argument(
+        '--no-text',
+        action='store_false',
+        dest='text',
+        help='Disable plain text file generation'
+    )
+    parser.add_argument(
+        '-l', '--lrc',
+        action='store_true',
+        default=True,
+        help='Generate LRC lyrics file (enabled by default, use --no-lrc to disable)'
+    )
+    parser.add_argument(
+        '--no-lrc',
+        action='store_false',
+        dest='lrc',
+        help='Disable LRC lyrics file generation'
     )
     parser.add_argument(
         '-o', '--output',
@@ -192,6 +251,7 @@ def main():
             args.media_file,
             output_dir=args.output,
             generate_txt=args.text,
+            generate_lrc=args.lrc,
             model_name=model_name
         )
     elif input_path.is_dir():
@@ -231,6 +291,7 @@ def main():
                     audio_file,
                     output_dir=args.output,
                     generate_txt=args.text,
+                    generate_lrc=args.lrc,
                     model_name=model_name
                 )
                 successful += 1
