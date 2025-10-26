@@ -104,7 +104,7 @@ def convert_to_wav(input_file, wav_path):
     ]
     subprocess.run(cmd, check=True)
 
-def wav_to_subtitles(media_file, output_dir=None, generate_txt=True, generate_lrc=True, model_name="base"):
+def wav_to_subtitles(media_file, output_dir=None, generate_txt=True, generate_lrc=True, model_name="base", language=None):
     """
     Convert media file to SRT, TXT, and LRC using Whisper.
 
@@ -114,6 +114,7 @@ def wav_to_subtitles(media_file, output_dir=None, generate_txt=True, generate_lr
         generate_txt (bool): If True, generate plain text file (default: True).
         generate_lrc (bool): If True, generate LRC lyrics file (default: True).
         model_name (str): Whisper model to use (default: "base").
+        language (str, optional): Language code (e.g., 'en', 'zh', 'es'). If None, auto-detect.
     """
     # Start timing
     start_time = time.time()
@@ -160,7 +161,11 @@ def wav_to_subtitles(media_file, output_dir=None, generate_txt=True, generate_lr
 
     # Transcribe
     print(f"Transcribing {audio_path}...")
-    result = model.transcribe(audio_path, verbose=False)
+    transcribe_options = {'verbose': False}
+    if language:
+        transcribe_options['language'] = language
+        print(f"Using language: {language}")
+    result = model.transcribe(audio_path, **transcribe_options)
 
     # Write SRT
     print(f"Writing subtitles to {srt_file}...")
@@ -239,6 +244,12 @@ def main():
         action='store_true',
         help='Process audio files in subdirectories recursively (only applies when input is a directory)'
     )
+    parser.add_argument(
+        '--language', '--lang',
+        type=str,
+        default=None,
+        help='Language code for transcription (e.g., en, zh, es, fr). If not specified, auto-detect.'
+    )
     args = parser.parse_args()
 
     model_name = "large-v3" if args.large_v3 else "base"
@@ -247,12 +258,17 @@ def main():
     # Check if input is a file or directory
     if input_path.is_file():
         # Single file processing
+        if args.language:
+            print(f"Using language: {args.language}")
+        else:
+            print("Language: auto-detect")
         wav_to_subtitles(
             args.media_file,
             output_dir=args.output,
             generate_txt=args.text,
             generate_lrc=args.lrc,
-            model_name=model_name
+            model_name=model_name,
+            language=args.language
         )
     elif input_path.is_dir():
         # Directory processing
@@ -273,6 +289,10 @@ def main():
         
         # Ask for confirmation
         print(f"\nAbout to process {len(audio_files)} file(s) using the '{model_name}' model.")
+        if args.language:
+            print(f"Language: {args.language}")
+        else:
+            print("Language: auto-detect")
         response = input("Continue? (y/n): ").strip().lower()
         
         if response not in ['y', 'yes']:
@@ -292,7 +312,8 @@ def main():
                     output_dir=args.output,
                     generate_txt=args.text,
                     generate_lrc=args.lrc,
-                    model_name=model_name
+                    model_name=model_name,
+                    language=args.language
                 )
                 successful += 1
             except Exception as e:
