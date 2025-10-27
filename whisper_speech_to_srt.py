@@ -104,15 +104,15 @@ def convert_to_wav(input_file, wav_path):
     ]
     subprocess.run(cmd, check=True)
 
-def wav_to_subtitles(media_file, output_dir=None, generate_txt=True, generate_lrc=True, model_name="base", language=None):
+def wav_to_subtitles(media_file, output_dir=None, generate_txt=False, generate_lrc=False, model_name="base", language=None):
     """
     Convert media file to SRT, TXT, and LRC using Whisper.
 
     Args:
         media_file (str): Path to input media (WAV, M4A, MP3, MP4).
         output_dir (str, optional): Directory for output files. If None, use input file's directory.
-        generate_txt (bool): If True, generate plain text file (default: True).
-        generate_lrc (bool): If True, generate LRC lyrics file (default: True).
+        generate_txt (bool): If True, generate plain text file (default: False).
+        generate_lrc (bool): If True, generate LRC lyrics file (default: False).
         model_name (str): Whisper model to use (default: "base").
         language (str, optional): Language code (e.g., 'en', 'zh', 'es'). If None, auto-detect.
     """
@@ -206,26 +206,14 @@ def main():
     parser.add_argument(
         '-t', '--text',
         action='store_true',
-        default=True,
-        help='Generate plain text output (enabled by default, use --no-text to disable)'
-    )
-    parser.add_argument(
-        '--no-text',
-        action='store_false',
-        dest='text',
-        help='Disable plain text file generation'
+        default=False,
+        help='Generate plain text output'
     )
     parser.add_argument(
         '-l', '--lrc',
         action='store_true',
-        default=True,
-        help='Generate LRC lyrics file (enabled by default, use --no-lrc to disable)'
-    )
-    parser.add_argument(
-        '--no-lrc',
-        action='store_false',
-        dest='lrc',
-        help='Disable LRC lyrics file generation'
+        default=False,
+        help='Generate LRC lyrics file'
     )
     parser.add_argument(
         '-o', '--output',
