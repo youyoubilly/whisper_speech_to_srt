@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisper-speech-to-srt"
+version = "1.0.0"
+description = "Convert audio/video to SRT subtitles using Whisper"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "openai-whisper",
+]
+
+[project.scripts]
+whisper-srt = "whisper_speech_to_srt:main"
+

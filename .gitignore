@@ -10,3 +10,9 @@ whisper/
 .ipynb_checkpoints/
 .DS_Store
 source/
+__pycache__
+
+# Package build/distribution metadata
+*.egg-info/
+dist/
+build/
