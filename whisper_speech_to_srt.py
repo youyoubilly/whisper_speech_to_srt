@@ -70,7 +70,7 @@ def find_audio_files(directory, recursive=False):
     Returns:
         list: List of audio/video file paths.
     """
-    supported_extensions = {'.wav', '.m4a', '.mp3', '.mp4'}
+    supported_extensions = {'.wav', '.m4a', '.mp3', '.mp4', '.mov', '.avi', '.mkv', '.flv', '.webm', '.m4v', '.3gp'}
     audio_files = []
     
     directory_path = Path(directory)
@@ -92,7 +92,8 @@ def find_audio_files(directory, recursive=False):
 
 def convert_to_wav(input_file, wav_path):
     """
-    Convert input media (e.g., MP4) to WAV using ffmpeg.
+    Extract audio from video/audio file and convert to WAV using ffmpeg.
+    Supports any video/audio format that ffmpeg can handle.
     """
     cmd = [
         'ffmpeg',
@@ -109,7 +110,7 @@ def wav_to_subtitles(media_file, output_dir=None, generate_srt=True, generate_tx
     Convert media file to SRT, TXT, and LRC using Whisper.
 
     Args:
-        media_file (str): Path to input media (WAV, M4A, MP3, MP4).
+        media_file (str): Path to input media (audio: WAV, M4A, MP3; video: MP4, MOV, AVI, MKV, FLV, WEBM, M4V, 3GP).
         output_dir (str, optional): Directory for output files. If None, use input file's directory.
         generate_srt (bool): If True, generate SRT subtitle file (default: True).
         generate_txt (bool): If True, generate plain text file (default: False).
@@ -126,6 +127,7 @@ def wav_to_subtitles(media_file, output_dir=None, generate_srt=True, generate_tx
     # Supported extensions
     ext = Path(media_file).suffix.lower()
     valid_audio = {'.wav', '.m4a', '.mp3'}
+    valid_video = {'.mp4', '.mov', '.avi', '.mkv', '.flv', '.webm', '.m4v', '.3gp'}
     temp_wav = None
 
     # Determine output directory
@@ -135,17 +137,18 @@ def wav_to_subtitles(media_file, output_dir=None, generate_srt=True, generate_tx
         output_dir = Path(output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-    if ext == '.mp4':
-        # Convert MP4 to WAV first
+    if ext in valid_video:
+        # Extract audio from video file and convert to WAV
         base = Path(media_file).stem
         temp_wav = os.path.join(output_dir, f"{base}_temp.wav")
-        print(f"Converting {media_file} to WAV...")
+        print(f"Extracting audio from {media_file} and converting to WAV...")
         convert_to_wav(media_file, temp_wav)
         audio_path = temp_wav
     elif ext in valid_audio:
         audio_path = media_file
     else:
-        raise ValueError(f"Unsupported file type: {ext}. Supported: WAV, M4A, MP3, MP4.")
+        supported_formats = ', '.join(sorted(valid_audio | valid_video))
+        raise ValueError(f"Unsupported file type: {ext}. Supported formats: {supported_formats}.")
 
     # Paths for outputs
     base_name = Path(media_file).stem
@@ -205,7 +208,7 @@ def main():
     )
     parser.add_argument(
         'media_file',
-        help='Path to input media file or directory (WAV, M4A, MP3, MP4)'
+        help='Path to input media file or directory (audio: WAV, M4A, MP3; video: MP4, MOV, AVI, MKV, FLV, WEBM, M4V, 3GP)'
     )
     parser.add_argument(
         '-s', '--srt',

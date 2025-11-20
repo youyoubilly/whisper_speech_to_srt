@@ -14,4 +14,6 @@ dependencies = [
 
 [project.scripts]
 whisper-srt = "whisper_speech_to_srt:main"
+srt2txt = "srt_to_txt:main"
+srt2lrc = "srt_to_lrc:main"
 
