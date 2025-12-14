@@ -9,6 +9,7 @@ Output:
 
 import sys
 import os
+import atexit
 from pathlib import Path
 import pysrt
 from openai import OpenAI
@@ -18,11 +19,32 @@ import httpx
 MODEL_NAME = "openai/gpt-oss-20b"
 LM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1"
 TEMPERATURE = 0.3
-MAX_CHARS = 12000   # safety limit for very large SRTs
+MAX_CHARS = 12000   # safety limit for very large SRTs (legacy, kept for compatibility)
+MAX_CHARS_SAFE = 8000   # Safe character limit to avoid hitting token limits
+TEMP_FILE_PREFIX = "._temp_"  # Prefix for temporary files
+MAX_DEPTH = 3  # Maximum recursion depth (default: 3 levels)
 # ---------------------------------------
 
+# Global list to track temporary files for cleanup
+_temp_files = []
 
-def read_srt_text(srt_path: Path) -> str:
+
+# Custom exceptions
+class TokenLimitExceeded(Exception):
+    """Raised when the text exceeds the LLM token limit."""
+    pass
+
+
+class MaxDepthExceeded(Exception):
+    """Raised when maximum recursion depth is reached."""
+    pass
+
+
+def read_srt_text(srt_path: Path, max_chars: int = None) -> str:
+    """Read SRT file and extract text content."""
+    if max_chars is None:
+        max_chars = MAX_CHARS
+    
     subs = pysrt.open(str(srt_path), encoding="utf-8")
 
     lines = []
@@ -34,10 +56,68 @@ def read_srt_text(srt_path: Path) -> str:
     full_text = "\n".join(lines)
 
     # prevent sending extremely large payloads
-    if len(full_text) > MAX_CHARS:
-        full_text = full_text[:MAX_CHARS] + "\n\n[TRUNCATED]"
+    if len(full_text) > max_chars:
+        full_text = full_text[:max_chars] + "\n\n[TRUNCATED]"
 
     return full_text
+
+
+def split_srt_file(srt_path: Path) -> tuple[Path, Path]:
+    """Split an SRT file into two parts by subtitle count.
+    
+    Returns:
+        tuple[Path, Path]: Paths to the two temporary SRT files
+    """
+    subs = pysrt.open(str(srt_path), encoding="utf-8")
+    subs_list = list(subs)
+    
+    if len(subs_list) < 2:
+        raise ValueError("Cannot split SRT file with less than 2 subtitles")
+    
+    # Split in half (first half gets extra one if odd number)
+    mid_point = (len(subs_list) + 1) // 2
+    first_half = subs_list[:mid_point]
+    second_half = subs_list[mid_point:]
+    
+    # Create temporary file paths
+    base_name = srt_path.stem
+    parent_dir = srt_path.parent
+    temp_file1 = parent_dir / f"{TEMP_FILE_PREFIX}{base_name}_part1.srt"
+    temp_file2 = parent_dir / f"{TEMP_FILE_PREFIX}{base_name}_part2.srt"
+    
+    # Write first half
+    with open(temp_file1, 'w', encoding='utf-8') as f:
+        for i, sub in enumerate(first_half, start=1):
+            f.write(f"{i}\n")
+            f.write(f"{sub.start} --> {sub.end}\n")
+            f.write(f"{sub.text}\n\n")
+    
+    # Write second half
+    with open(temp_file2, 'w', encoding='utf-8') as f:
+        for i, sub in enumerate(second_half, start=1):
+            f.write(f"{i}\n")
+            f.write(f"{sub.start} --> {sub.end}\n")
+            f.write(f"{sub.text}\n\n")
+    
+    # Track temporary files for cleanup
+    _temp_files.append(temp_file1)
+    _temp_files.append(temp_file2)
+    
+    return temp_file1, temp_file2
+
+
+def cleanup_temp_files():
+    """Remove all tracked temporary files."""
+    for temp_file in _temp_files:
+        try:
+            if temp_file.exists():
+                temp_file.unlink()
+        except Exception as e:
+            print(f"⚠️  Warning: Could not delete temporary file {temp_file}: {e}")
+
+
+# Register cleanup function to run on exit
+atexit.register(cleanup_temp_files)
 
 
 def check_api_available() -> bool:
@@ -90,6 +170,247 @@ def check_api_available() -> bool:
             else:
                 os.environ.pop('NO_PROXY', None)
         return False
+
+
+def combine_summaries(summary1: str, summary2: str) -> str:
+    """Combine two summaries into one coherent markdown document using LLM."""
+    try:
+        # Save original proxy env vars
+        original_http_proxy = os.environ.pop('HTTP_PROXY', None)
+        original_https_proxy = os.environ.pop('HTTPS_PROXY', None)
+        original_all_proxy = os.environ.pop('ALL_PROXY', None)
+        original_no_proxy = os.environ.get('NO_PROXY', '')
+        
+        # Set NO_PROXY to bypass proxy for localhost
+        os.environ['NO_PROXY'] = '127.0.0.1,localhost'
+        # Also clear proxy env vars for httpx
+        os.environ.pop('HTTP_PROXY', None)
+        os.environ.pop('HTTPS_PROXY', None)
+        os.environ.pop('http_proxy', None)
+        os.environ.pop('https_proxy', None)
+        
+        http_client = httpx.Client(timeout=30.0)
+        
+        client = OpenAI(
+            base_url=LM_STUDIO_BASE_URL,
+            api_key="lm-studio",  # dummy key
+            http_client=http_client
+        )
+
+        prompt = f"""
+Combine the following two summary documents into one coherent Markdown document.
+
+Requirements:
+- Merge the two summaries into a single, well-structured document
+- Start with a clear title (use the most appropriate one or create a new unified title)
+- Use sections with headings
+- Bullet points where appropriate
+- Remove duplicate information
+- Ensure continuity and flow between the two parts
+- Maintain focus on key ideas and conclusions
+- Do NOT mention that this comes from multiple parts or that it was combined
+
+First Summary:
+{summary1}
+
+Second Summary:
+{summary2}
+
+Return the combined summary as a single Markdown document.
+"""
+
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": "You are a precise technical summarizer that combines multiple summaries into coherent documents."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=TEMPERATURE,
+            timeout=30.0
+        )
+
+        result = response.choices[0].message.content.strip()
+        http_client.close()
+        
+        # Restore proxy env vars
+        if original_http_proxy:
+            os.environ['HTTP_PROXY'] = original_http_proxy
+        if original_https_proxy:
+            os.environ['HTTPS_PROXY'] = original_https_proxy
+        if original_all_proxy:
+            os.environ['ALL_PROXY'] = original_all_proxy
+        if original_no_proxy:
+            os.environ['NO_PROXY'] = original_no_proxy
+        else:
+            os.environ.pop('NO_PROXY', None)
+        
+        return result
+    except Exception as e:
+        if 'http_client' in locals():
+            http_client.close()
+        # Restore proxy env vars
+        if 'original_http_proxy' in locals() and original_http_proxy:
+            os.environ['HTTP_PROXY'] = original_http_proxy
+        if 'original_https_proxy' in locals() and original_https_proxy:
+            os.environ['HTTPS_PROXY'] = original_https_proxy
+        if 'original_all_proxy' in locals() and original_all_proxy:
+            os.environ['ALL_PROXY'] = original_all_proxy
+        if 'original_no_proxy' in locals():
+            if original_no_proxy:
+                os.environ['NO_PROXY'] = original_no_proxy
+            else:
+                os.environ.pop('NO_PROXY', None)
+        raise
+
+
+def summarize_recursive(text: str, srt_path: Path, depth: int = 0) -> str:
+    """Recursively summarize text, splitting if too long.
+    
+    Args:
+        text: The text content to summarize
+        srt_path: Path to the original SRT file (for splitting if needed)
+        depth: Current recursion depth
+        
+    Returns:
+        Summarized markdown text
+        
+    Raises:
+        MaxDepthExceeded: If maximum recursion depth is reached
+        TokenLimitExceeded: If text is too long and depth limit reached
+    """
+    # Check depth limit
+    if depth >= MAX_DEPTH:
+        raise MaxDepthExceeded(
+            f"Maximum recursion depth ({MAX_DEPTH}) reached. "
+            f"The SRT file is too long even after {MAX_DEPTH} levels of splitting. "
+            f"Please manually split the file or increase MAX_DEPTH."
+        )
+    
+    # Check if text is too long
+    should_split = len(text) > MAX_CHARS_SAFE
+    
+    if should_split:
+        print(f"📊 Text too long ({len(text)} chars), splitting into 2 parts (depth {depth + 1}/{MAX_DEPTH})...")
+        
+        # Split the SRT file
+        try:
+            temp_file1, temp_file2 = split_srt_file(srt_path)
+            print(f"   ✓ Split into: {temp_file1.name} and {temp_file2.name}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to split SRT file: {e}")
+        
+        # Read text from split files
+        try:
+            text1 = read_srt_text(temp_file1, max_chars=None)  # Read full content
+            text2 = read_srt_text(temp_file2, max_chars=None)
+        except Exception as e:
+            raise RuntimeError(f"Failed to read split SRT files: {e}")
+        
+        # Recursively summarize each part
+        print(f"   🧠 Processing part 1/2 (depth {depth + 1}/{MAX_DEPTH})...")
+        try:
+            summary1 = summarize_recursive(text1, temp_file1, depth + 1)
+        except Exception as e:
+            # Clean up temp files before re-raising
+            cleanup_temp_files()
+            raise
+        
+        print(f"   🧠 Processing part 2/2 (depth {depth + 1}/{MAX_DEPTH})...")
+        try:
+            summary2 = summarize_recursive(text2, temp_file2, depth + 1)
+        except Exception as e:
+            # Clean up temp files before re-raising
+            cleanup_temp_files()
+            raise
+        
+        # Combine the summaries
+        print(f"   🔗 Combining summaries (depth {depth + 1}/{MAX_DEPTH})...")
+        try:
+            combined = combine_summaries(summary1, summary2)
+        except Exception as e:
+            cleanup_temp_files()
+            raise RuntimeError(f"Failed to combine summaries: {e}")
+        
+        # Clean up temporary SRT files (but keep summaries if they were saved)
+        try:
+            if temp_file1.exists():
+                temp_file1.unlink()
+            if temp_file2.exists():
+                temp_file2.unlink()
+            # Remove from tracking list
+            if temp_file1 in _temp_files:
+                _temp_files.remove(temp_file1)
+            if temp_file2 in _temp_files:
+                _temp_files.remove(temp_file2)
+        except Exception as e:
+            print(f"⚠️  Warning: Could not delete temporary files: {e}")
+        
+        return combined
+    
+    # Text is within safe limit, try to summarize
+    try:
+        return summarize(text)
+    except TokenLimitExceeded:
+        # If we hit token limit and haven't reached max depth, force splitting
+        if depth < MAX_DEPTH:
+            print(f"⚠️  Token limit exceeded (text length: {len(text)}), forcing split (depth {depth + 1}/{MAX_DEPTH})...")
+            # Force splitting by going through the splitting path
+            # Split the SRT file
+            try:
+                temp_file1, temp_file2 = split_srt_file(srt_path)
+                print(f"   ✓ Split into: {temp_file1.name} and {temp_file2.name}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to split SRT file: {e}")
+            
+            # Read text from split files
+            try:
+                text1 = read_srt_text(temp_file1, max_chars=None)
+                text2 = read_srt_text(temp_file2, max_chars=None)
+            except Exception as e:
+                raise RuntimeError(f"Failed to read split SRT files: {e}")
+            
+            # Recursively summarize each part
+            print(f"   🧠 Processing part 1/2 (depth {depth + 1}/{MAX_DEPTH})...")
+            try:
+                summary1 = summarize_recursive(text1, temp_file1, depth + 1)
+            except Exception as e:
+                cleanup_temp_files()
+                raise
+            
+            print(f"   🧠 Processing part 2/2 (depth {depth + 1}/{MAX_DEPTH})...")
+            try:
+                summary2 = summarize_recursive(text2, temp_file2, depth + 1)
+            except Exception as e:
+                cleanup_temp_files()
+                raise
+            
+            # Combine the summaries
+            print(f"   🔗 Combining summaries (depth {depth + 1}/{MAX_DEPTH})...")
+            try:
+                combined = combine_summaries(summary1, summary2)
+            except Exception as e:
+                cleanup_temp_files()
+                raise RuntimeError(f"Failed to combine summaries: {e}")
+            
+            # Clean up temporary SRT files
+            try:
+                if temp_file1.exists():
+                    temp_file1.unlink()
+                if temp_file2.exists():
+                    temp_file2.unlink()
+                if temp_file1 in _temp_files:
+                    _temp_files.remove(temp_file1)
+                if temp_file2 in _temp_files:
+                    _temp_files.remove(temp_file2)
+            except Exception as e:
+                print(f"⚠️  Warning: Could not delete temporary files: {e}")
+            
+            return combined
+        else:
+            raise MaxDepthExceeded(
+                f"Maximum recursion depth ({MAX_DEPTH}) reached. "
+                f"The text segment is still too long. Please manually split the file or increase MAX_DEPTH."
+            )
 
 
 def summarize(text: str) -> str:
@@ -171,7 +492,13 @@ Transcript:
                 os.environ['NO_PROXY'] = original_no_proxy
             else:
                 os.environ.pop('NO_PROXY', None)
-        raise  # Re-raise the exception to be handled by main()
+        
+        # Check if this is a token limit error
+        error_str = str(e).lower()
+        if '400' in error_str or 'token' in error_str or 'context length' in error_str or 'context_length' in error_str:
+            raise TokenLimitExceeded(f"Text exceeds LLM token limit: {e}")
+        
+        raise  # Re-raise other exceptions
 
 
 def main():
@@ -186,7 +513,7 @@ def main():
         sys.exit(1)
 
     print(f"📄 Reading: {srt_path}")
-    text = read_srt_text(srt_path)
+    text = read_srt_text(srt_path, max_chars=None)  # Read full content for recursive processing
     
     if not text.strip():
         print("⚠️  Warning: No text found in SRT file")
@@ -208,9 +535,25 @@ def main():
 
     print("🧠 Summarizing with openai/gpt-oss-20b...")
     try:
-        summary_md = summarize(text)
+        summary_md = summarize_recursive(text, srt_path)
     except KeyboardInterrupt:
         print("\n⚠️  Interrupted by user")
+        cleanup_temp_files()
+        sys.exit(1)
+    except MaxDepthExceeded as e:
+        print(f"\n❌ Error: {e}")
+        print("\n💡 Suggestion:")
+        print("   The SRT file is extremely long. Consider:")
+        print("   1. Manually splitting the file into smaller parts")
+        print("   2. Increasing MAX_DEPTH in the script (if your system can handle it)")
+        print("   3. Using a model with a larger context window")
+        cleanup_temp_files()
+        sys.exit(1)
+    except TokenLimitExceeded as e:
+        print(f"\n❌ Error: {e}")
+        print("\n💡 This should not happen - the recursive splitting should handle this.")
+        print("   Please report this issue.")
+        cleanup_temp_files()
         sys.exit(1)
     except Exception as e:
         print(f"\n❌ Error during summarization: {e}")
@@ -219,12 +562,16 @@ def main():
         print("   1. LM Studio is running")
         print(f"   2. The model ({MODEL_NAME}) is loaded and server is started")
         print(f"   3. The API is accessible at: {LM_STUDIO_BASE_URL}")
+        cleanup_temp_files()
         sys.exit(1)
 
     output_path = srt_path.with_suffix(".summary.md")
     output_path.write_text(summary_md, encoding="utf-8")
 
     print(f"✅ Summary written to: {output_path}")
+    
+    # Final cleanup
+    cleanup_temp_files()
 
 
 if __name__ == "__main__":
