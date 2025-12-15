@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Usage:
-  python srt_to_summary.py path/to/file.srt
+  python md_summarise_by_llm.py path/to/file.md
 
 Output:
   path/to/file.summary.md
@@ -11,7 +11,6 @@ import sys
 import os
 import atexit
 from pathlib import Path
-import pysrt
 from openai import OpenAI
 import httpx
 
@@ -19,7 +18,6 @@ import httpx
 MODEL_NAME = "openai/gpt-oss-20b"
 LM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1"
 TEMPERATURE = 0.3
-MAX_CHARS = 12000   # safety limit for very large SRTs (legacy, kept for compatibility)
 MAX_CHARS_SAFE = 8000   # Safe character limit to avoid hitting token limits
 TEMP_FILE_PREFIX = "._temp_"  # Prefix for temporary files
 MAX_DEPTH = 3  # Maximum recursion depth (default: 3 levels)
@@ -40,64 +38,63 @@ class MaxDepthExceeded(Exception):
     pass
 
 
-def read_srt_text(srt_path: Path, max_chars: int = None) -> str:
-    """Read SRT file and extract text content."""
+def read_md_text(md_path: Path, max_chars: int = None) -> str:
+    """Read markdown file and extract text content."""
     if max_chars is None:
-        max_chars = MAX_CHARS
+        max_chars = MAX_CHARS_SAFE * 2  # Allow larger initial read
     
-    subs = pysrt.open(str(srt_path), encoding="utf-8")
-
-    lines = []
-    for sub in subs:
-        text = sub.text.replace("\n", " ").strip()
-        if text:
-            lines.append(text)
-
-    full_text = "\n".join(lines)
-
-    # prevent sending extremely large payloads
+    try:
+        with open(md_path, 'r', encoding='utf-8') as f:
+            full_text = f.read()
+    except Exception as e:
+        raise RuntimeError(f"Failed to read markdown file: {e}")
+    
+    # Prevent sending extremely large payloads
     if len(full_text) > max_chars:
         full_text = full_text[:max_chars] + "\n\n[TRUNCATED]"
-
+    
     return full_text
 
 
-def split_srt_file(srt_path: Path) -> tuple[Path, Path]:
-    """Split an SRT file into two parts by subtitle count.
+def split_md_file(md_path: Path) -> tuple[Path, Path]:
+    """Split a markdown file into two parts by line count.
     
     Returns:
-        tuple[Path, Path]: Paths to the two temporary SRT files
+        tuple[Path, Path]: Paths to the two temporary markdown files
     """
-    subs = pysrt.open(str(srt_path), encoding="utf-8")
-    subs_list = list(subs)
+    try:
+        with open(md_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except Exception as e:
+        raise RuntimeError(f"Failed to read markdown file for splitting: {e}")
     
-    if len(subs_list) < 2:
-        raise ValueError("Cannot split SRT file with less than 2 subtitles")
+    if len(lines) < 2:
+        raise ValueError("Cannot split markdown file with less than 2 lines")
     
     # Split in half (first half gets extra one if odd number)
-    mid_point = (len(subs_list) + 1) // 2
-    first_half = subs_list[:mid_point]
-    second_half = subs_list[mid_point:]
+    mid_point = (len(lines) + 1) // 2
+    first_half = lines[:mid_point]
+    second_half = lines[mid_point:]
     
     # Create temporary file paths
-    base_name = srt_path.stem
-    parent_dir = srt_path.parent
-    temp_file1 = parent_dir / f"{TEMP_FILE_PREFIX}{base_name}_part1.srt"
-    temp_file2 = parent_dir / f"{TEMP_FILE_PREFIX}{base_name}_part2.srt"
+    base_name = md_path.stem
+    parent_dir = md_path.parent
+    temp_file1 = parent_dir / f"{TEMP_FILE_PREFIX}{base_name}_part1.md"
+    temp_file2 = parent_dir / f"{TEMP_FILE_PREFIX}{base_name}_part2.md"
     
     # Write first half
-    with open(temp_file1, 'w', encoding='utf-8') as f:
-        for i, sub in enumerate(first_half, start=1):
-            f.write(f"{i}\n")
-            f.write(f"{sub.start} --> {sub.end}\n")
-            f.write(f"{sub.text}\n\n")
+    try:
+        with open(temp_file1, 'w', encoding='utf-8') as f:
+            f.writelines(first_half)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write temporary file: {e}")
     
     # Write second half
-    with open(temp_file2, 'w', encoding='utf-8') as f:
-        for i, sub in enumerate(second_half, start=1):
-            f.write(f"{i}\n")
-            f.write(f"{sub.start} --> {sub.end}\n")
-            f.write(f"{sub.text}\n\n")
+    try:
+        with open(temp_file2, 'w', encoding='utf-8') as f:
+            f.writelines(second_half)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write temporary file: {e}")
     
     # Track temporary files for cleanup
     _temp_files.append(temp_file1)
@@ -263,12 +260,12 @@ Return the combined summary as a single Markdown document.
         raise
 
 
-def summarize_recursive(text: str, srt_path: Path, depth: int = 0) -> str:
+def summarize_recursive(text: str, md_path: Path, depth: int = 0) -> str:
     """Recursively summarize text, splitting if too long.
     
     Args:
         text: The text content to summarize
-        srt_path: Path to the original SRT file (for splitting if needed)
+        md_path: Path to the original markdown file (for splitting if needed)
         depth: Current recursion depth
         
     Returns:
@@ -282,7 +279,7 @@ def summarize_recursive(text: str, srt_path: Path, depth: int = 0) -> str:
     if depth >= MAX_DEPTH:
         raise MaxDepthExceeded(
             f"Maximum recursion depth ({MAX_DEPTH}) reached. "
-            f"The SRT file is too long even after {MAX_DEPTH} levels of splitting. "
+            f"The markdown file is too long even after {MAX_DEPTH} levels of splitting. "
             f"Please manually split the file or increase MAX_DEPTH."
         )
     
@@ -292,19 +289,19 @@ def summarize_recursive(text: str, srt_path: Path, depth: int = 0) -> str:
     if should_split:
         print(f"📊 Text too long ({len(text)} chars), splitting into 2 parts (depth {depth + 1}/{MAX_DEPTH})...")
         
-        # Split the SRT file
+        # Split the markdown file
         try:
-            temp_file1, temp_file2 = split_srt_file(srt_path)
+            temp_file1, temp_file2 = split_md_file(md_path)
             print(f"   ✓ Split into: {temp_file1.name} and {temp_file2.name}")
         except Exception as e:
-            raise RuntimeError(f"Failed to split SRT file: {e}")
+            raise RuntimeError(f"Failed to split markdown file: {e}")
         
         # Read text from split files
         try:
-            text1 = read_srt_text(temp_file1, max_chars=None)  # Read full content
-            text2 = read_srt_text(temp_file2, max_chars=None)
+            text1 = read_md_text(temp_file1, max_chars=None)  # Read full content
+            text2 = read_md_text(temp_file2, max_chars=None)
         except Exception as e:
-            raise RuntimeError(f"Failed to read split SRT files: {e}")
+            raise RuntimeError(f"Failed to read split markdown files: {e}")
         
         # Recursively summarize each part
         print(f"   🧠 Processing part 1/2 (depth {depth + 1}/{MAX_DEPTH})...")
@@ -331,7 +328,7 @@ def summarize_recursive(text: str, srt_path: Path, depth: int = 0) -> str:
             cleanup_temp_files()
             raise RuntimeError(f"Failed to combine summaries: {e}")
         
-        # Clean up temporary SRT files (but keep summaries if they were saved)
+        # Clean up temporary markdown files (but keep summaries if they were saved)
         try:
             if temp_file1.exists():
                 temp_file1.unlink()
@@ -355,19 +352,19 @@ def summarize_recursive(text: str, srt_path: Path, depth: int = 0) -> str:
         if depth < MAX_DEPTH:
             print(f"⚠️  Token limit exceeded (text length: {len(text)}), forcing split (depth {depth + 1}/{MAX_DEPTH})...")
             # Force splitting by going through the splitting path
-            # Split the SRT file
+            # Split the markdown file
             try:
-                temp_file1, temp_file2 = split_srt_file(srt_path)
+                temp_file1, temp_file2 = split_md_file(md_path)
                 print(f"   ✓ Split into: {temp_file1.name} and {temp_file2.name}")
             except Exception as e:
-                raise RuntimeError(f"Failed to split SRT file: {e}")
+                raise RuntimeError(f"Failed to split markdown file: {e}")
             
             # Read text from split files
             try:
-                text1 = read_srt_text(temp_file1, max_chars=None)
-                text2 = read_srt_text(temp_file2, max_chars=None)
+                text1 = read_md_text(temp_file1, max_chars=None)
+                text2 = read_md_text(temp_file2, max_chars=None)
             except Exception as e:
-                raise RuntimeError(f"Failed to read split SRT files: {e}")
+                raise RuntimeError(f"Failed to read split markdown files: {e}")
             
             # Recursively summarize each part
             print(f"   🧠 Processing part 1/2 (depth {depth + 1}/{MAX_DEPTH})...")
@@ -392,7 +389,7 @@ def summarize_recursive(text: str, srt_path: Path, depth: int = 0) -> str:
                 cleanup_temp_files()
                 raise RuntimeError(f"Failed to combine summaries: {e}")
             
-            # Clean up temporary SRT files
+            # Clean up temporary markdown files
             try:
                 if temp_file1.exists():
                     temp_file1.unlink()
@@ -583,17 +580,17 @@ def summarize(text: str) -> str:
         )
 
         prompt = f"""
-Summarize the following transcript into a clean Markdown document.
+Summarize the following document into a clean Markdown document.
 
 Requirements:
 - Start with a clear title
 - Use sections with headings
 - Bullet points where appropriate
 - Focus on key ideas and conclusions
-- Do NOT mention timestamps or subtitles
-- Do NOT mention that this comes from an SRT file
+- Preserve important details and structure
+- Maintain the document's main themes and topics
 
-Transcript:
+Document:
 {text}
 """
 
@@ -647,20 +644,20 @@ Transcript:
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python srt_to_summary.py path/to/file.srt")
+        print("Usage: python md_summarise_by_llm.py path/to/file.md")
         sys.exit(1)
 
-    srt_path = Path(sys.argv[1])
+    md_path = Path(sys.argv[1])
 
-    if not srt_path.exists() or srt_path.suffix.lower() != ".srt":
-        print("Error: input must be an existing .srt file")
+    if not md_path.exists() or md_path.suffix.lower() != ".md":
+        print("Error: input must be an existing .md file")
         sys.exit(1)
 
-    print(f"📄 Reading: {srt_path}")
-    text = read_srt_text(srt_path, max_chars=None)  # Read full content for recursive processing
+    print(f"📄 Reading: {md_path}")
+    text = read_md_text(md_path, max_chars=None)  # Read full content for recursive processing
     
     if not text.strip():
-        print("⚠️  Warning: No text found in SRT file")
+        print("⚠️  Warning: No text found in markdown file")
         sys.exit(1)
 
     # Check if LM Studio API is available
@@ -679,7 +676,7 @@ def main():
 
     print("🧠 Summarizing with openai/gpt-oss-20b...")
     try:
-        summary_md = summarize_recursive(text, srt_path)
+        summary_md = summarize_recursive(text, md_path)
     except KeyboardInterrupt:
         print("\n⚠️  Interrupted by user")
         cleanup_temp_files()
@@ -687,7 +684,7 @@ def main():
     except MaxDepthExceeded as e:
         print(f"\n❌ Error: {e}")
         print("\n💡 Suggestion:")
-        print("   The SRT file is extremely long. Consider:")
+        print("   The markdown file is extremely long. Consider:")
         print("   1. Manually splitting the file into smaller parts")
         print("   2. Increasing MAX_DEPTH in the script (if your system can handle it)")
         print("   3. Using a model with a larger context window")
@@ -721,7 +718,7 @@ def main():
     # Format summary with tags
     formatted_summary = format_summary_with_tags(summary_md, tags)
     
-    output_path = srt_path.with_suffix(".summary.md")
+    output_path = md_path.with_suffix(".summary.md")
     output_path.write_text(formatted_summary, encoding="utf-8")
 
     print(f"✅ Summary written to: {output_path}")
@@ -732,3 +729,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
