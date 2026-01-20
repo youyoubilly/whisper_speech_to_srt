@@ -70,7 +70,7 @@ def find_audio_files(directory, recursive=False):
     Returns:
         list: List of audio/video file paths.
     """
-    supported_extensions = {'.wav', '.m4a', '.mp3', '.mp4', '.mov', '.avi', '.mkv', '.flv', '.webm', '.m4v', '.3gp'}
+    supported_extensions = {'.wav', '.m4a', '.mp3', '.aac', '.mp4', '.mov', '.avi', '.mkv', '.flv', '.webm', '.m4v', '.3gp'}
     audio_files = []
     
     directory_path = Path(directory)
@@ -110,7 +110,7 @@ def wav_to_subtitles(media_file, output_dir=None, generate_srt=True, generate_tx
     Convert media file to SRT, TXT, and LRC using Whisper.
 
     Args:
-        media_file (str): Path to input media (audio: WAV, M4A, MP3; video: MP4, MOV, AVI, MKV, FLV, WEBM, M4V, 3GP).
+        media_file (str): Path to input media (audio: WAV, M4A, MP3, AAC; video: MP4, MOV, AVI, MKV, FLV, WEBM, M4V, 3GP).
         output_dir (str, optional): Directory for output files. If None, use input file's directory.
         generate_srt (bool): If True, generate SRT subtitle file (default: True).
         generate_txt (bool): If True, generate plain text file (default: False).
@@ -126,7 +126,7 @@ def wav_to_subtitles(media_file, output_dir=None, generate_srt=True, generate_tx
 
     # Supported extensions
     ext = Path(media_file).suffix.lower()
-    valid_audio = {'.wav', '.m4a', '.mp3'}
+    valid_audio = {'.wav', '.m4a', '.mp3', '.aac'}
     valid_video = {'.mp4', '.mov', '.avi', '.mkv', '.flv', '.webm', '.m4v', '.3gp'}
     temp_wav = None
 
@@ -208,7 +208,7 @@ def main():
     )
     parser.add_argument(
         'media_file',
-        help='Path to input media file or directory (audio: WAV, M4A, MP3; video: MP4, MOV, AVI, MKV, FLV, WEBM, M4V, 3GP)'
+        help='Path to input media file or directory (audio: WAV, M4A, MP3, AAC; video: MP4, MOV, AVI, MKV, FLV, WEBM, M4V, 3GP)'
     )
     parser.add_argument(
         '-s', '--srt',

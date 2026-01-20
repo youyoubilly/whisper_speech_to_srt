@@ -22,7 +22,7 @@ TEMPERATURE = 0.3
 MAX_CHARS = 12000   # safety limit for very large SRTs (legacy, kept for compatibility)
 MAX_CHARS_SAFE = 8000   # Safe character limit to avoid hitting token limits
 TEMP_FILE_PREFIX = "._temp_"  # Prefix for temporary files
-MAX_DEPTH = 3  # Maximum recursion depth (default: 3 levels)
+MAX_DEPTH = 5  # Maximum recursion depth (default: 3 levels)
 # ---------------------------------------
 
 # Global list to track temporary files for cleanup
