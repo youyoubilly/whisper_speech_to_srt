@@ -169,6 +169,8 @@ def wav_to_subtitles(media_file, output_dir=None, generate_srt=True, generate_tx
     if language:
         transcribe_options['language'] = language
         print(f"Using language: {language}")
+    else:
+        print("Language: auto-detect")
     result = model.transcribe(audio_path, **transcribe_options)
 
     # Write outputs based on flags
@@ -271,10 +273,6 @@ def main():
     # Check if input is a file or directory
     if input_path.is_file():
         # Single file processing
-        if args.lang:
-            print(f"Using language: {args.lang}")
-        else:
-            print("Language: auto-detect")
         wav_to_subtitles(
             args.media_file,
             output_dir=args.output,
@@ -303,10 +301,6 @@ def main():
         
         # Ask for confirmation
         print(f"\nAbout to process {len(audio_files)} file(s) using the '{model_name}' model.")
-        if args.lang:
-            print(f"Language: {args.lang}")
-        else:
-            print("Language: auto-detect")
         response = input("Continue? (y/n): ").strip().lower()
         
         if response not in ['y', 'yes']:

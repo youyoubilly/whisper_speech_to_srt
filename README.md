@@ -127,6 +127,39 @@ whisper-srt -t ~/Videos/lecture.mp4 -o transcripts --lang en
 - The base model is faster but less accurate; large-v3 is slower but more accurate
 - Specifying `--lang` can significantly improve accuracy and speed
 
+## Troubleshooting
+
+### `ERROR:root: code for hash blake2b/blake2s was not found`
+
+Harmless startup noise from Python’s `hashlib` when your pyenv Python was built against an OpenSSL without BLAKE2 support. Transcription still works; you can ignore these messages.
+
+To silence them, reinstall Python linked to Homebrew OpenSSL 3:
+
+```bash
+brew install openssl@3
+env PYTHON_CONFIGURE_OPTS="--with-openssl=$(brew --prefix openssl@3)" pyenv install -f 3.12.10
+pyenv global 3.12.10   # or local, as you prefer
+```
+
+Then recreate your virtualenv and reinstall this package.
+
+### `FP16 is not supported on CPU; using FP32 instead`
+
+Expected when running `whisper-srt` on CPU. Whisper falls back to FP32 automatically; results are correct, but large models are slower than on GPU.
+
+### Slow transcription on long files
+
+`whisper-srt --large-v3` runs the full OpenAI Whisper model on CPU. For long audio, expect several minutes of runtime.
+
+Faster options:
+
+- Use the default **base** model (omit `--large-v3`) for speed over accuracy.
+- On Apple Silicon, use **[stt_mps.py](stt_mps.py)** with a local `large-v3` model and MPS/CPU optimizations — see **[USAGE_STT_MPS.md](USAGE_STT_MPS.md)**.
+
+```bash
+python stt_mps.py -t -o /path/to/audio.m4a --language yue
+```
+
 ## Uninstall
 
 If you installed via `pip install -e .`:
