@@ -59,6 +59,12 @@ whisper-srt /path/to/folder
 
 # Process folder including subfolders
 whisper-srt -r /path/to/folder
+
+# Skip files that already have SRT (non-interactive)
+whisper-srt --skip-existing /path/to/folder
+
+# Reprocess all files, overwrite existing SRT (non-interactive)
+whisper-srt --force /path/to/folder
 ```
 
 ### Output Format Options
@@ -79,6 +85,8 @@ whisper-srt -r /path/to/folder
 | `--large-v3` | Use large-v3 model instead of base model |
 | `-r, --recursive` | Process subfolders (for directory input only) |
 | `--lang` | Specify language code (e.g., en, zh, es, fr) |
+| `--skip-existing` | Skip files that already have an SRT (directory mode; no prompt) |
+| `--force` | Reprocess all files, overwriting existing SRT (directory mode; no prompt) |
 
 ### Advanced Examples
 
@@ -98,6 +106,9 @@ whisper-srt -s -l -o output_folder audio.mp3
 # Process folder recursively with all formats
 whisper-srt -s -t -l -r --large-v3 --lang en /path/to/folder
 
+# Batch: only transcribe files without SRT, save to output/
+whisper-srt --skip-existing -o output_folder /path/to/folder
+
 # Process video file, generate only text transcript
 whisper-srt -t ~/Videos/lecture.mp4 -o transcripts --lang en
 ```
@@ -114,14 +125,16 @@ whisper-srt -t ~/Videos/lecture.mp4 -o transcripts --lang en
 - **Recursive scanning**: Include subfolders with `-r` flag
 - **Language support**: Specify language for faster and more accurate transcription
 - **Multiple output formats**: Generate SRT subtitles, plain text, and LRC lyrics files
-- **Confirmation prompt**: Lists all files before processing folders
+- **Existing SRT detection**: Folder mode lists files with/without SRT and prompts to skip or reprocess
+- **Batch CLI flags**: `--skip-existing` and `--force` for non-interactive folder processing
 - **Progress tracking**: Shows current/total progress for batch operations
 - **Error handling**: Continues processing remaining files if one fails
 - **Multiple models**: Choose between base (fast) or large-v3 (accurate)
 
 ## Notes
 
-- When processing folders, the script will list all found files and ask for confirmation
+- When processing folders, the script classifies files by existing SRT, then asks whether to skip existing, reprocess all, or cancel (unless `--skip-existing` or `--force` is set)
+- SRT detection uses the same output path as transcription: alongside the source file by default, or under `-o` when specified
 - By default, output files are saved in the same directory as input files
 - Use `-o` flag to organize outputs in a separate directory
 - The base model is faster but less accurate; large-v3 is slower but more accurate

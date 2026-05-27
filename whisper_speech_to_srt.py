@@ -90,6 +90,124 @@ def find_audio_files(directory, recursive=False):
     audio_files = list(set(audio_files))
     return sorted([str(f) for f in audio_files])
 
+def get_srt_output_path(media_file, output_dir=None):
+    """
+    Return the expected SRT output path for a media file.
+    Matches the path logic used in wav_to_subtitles.
+    """
+    base_name = Path(media_file).stem
+    if output_dir is None:
+        return Path(media_file).parent / f"{base_name}.srt"
+    return Path(output_dir) / f"{base_name}.srt"
+
+def classify_media_files(media_files, output_dir=None):
+    """
+    Split media files into those with an existing SRT and those without.
+
+    Returns:
+        tuple: (with_srt, without_srt) where each item is (media_path, srt_path).
+    """
+    with_srt = []
+    without_srt = []
+    for media_file in media_files:
+        srt_path = get_srt_output_path(media_file, output_dir)
+        if srt_path.exists():
+            with_srt.append((media_file, str(srt_path)))
+        else:
+            without_srt.append((media_file, str(srt_path)))
+    return with_srt, without_srt
+
+def print_batch_classification(audio_files, with_srt, without_srt):
+    """Print classified file lists for folder batch processing."""
+    print(f"\nFound {len(audio_files)} audio file(s):")
+
+    if with_srt:
+        print(f"\nAlready have SRT ({len(with_srt)}):")
+        for i, (media_path, srt_path) in enumerate(with_srt, 1):
+            print(f"  {i}. {media_path}")
+            print(f"     -> {srt_path}")
+
+    if without_srt:
+        print(f"\nNeed processing ({len(without_srt)}):")
+        for i, (media_path, _) in enumerate(without_srt, 1):
+            print(f"  {i}. {media_path}")
+
+def prompt_batch_action(audio_files, with_srt, without_srt, model_name):
+    """
+    Interactively ask whether to skip existing SRT files or reprocess all.
+
+    Returns:
+        list: Media file paths to process, or None if cancelled.
+    """
+    total = len(audio_files)
+    n_with = len(with_srt)
+    n_without = len(without_srt)
+
+    print(f"\nAbout to process using the '{model_name}' model.")
+
+    if n_with == 0:
+        print(f"\nNo existing SRT files found. {total} file(s) will be processed.")
+        response = input("Continue? (y/n): ").strip().lower()
+        if response not in ('y', 'yes'):
+            print("Operation cancelled.")
+            return None
+        return list(audio_files)
+
+    if n_without == 0:
+        print("\nChoose an action:")
+        print("  [1] Skip all (nothing to do)")
+        print(f"  [2] Reprocess all {total} file(s) (overwrite existing SRT)")
+        print("  [3] Cancel")
+        while True:
+            choice = input("Enter choice (1/2/3): ").strip()
+            if choice == '1':
+                print("All files skipped (SRT already exists).")
+                return []
+            if choice == '2':
+                return list(audio_files)
+            if choice == '3':
+                print("Operation cancelled.")
+                return None
+            print("Invalid choice. Please enter 1, 2, or 3.")
+
+    print("\nChoose an action:")
+    print(f"  [1] Skip existing, process {n_without} new file(s) only")
+    print(f"  [2] Reprocess all {total} file(s) (overwrite existing SRT)")
+    print("  [3] Cancel")
+    while True:
+        choice = input("Enter choice (1/2/3): ").strip()
+        if choice == '1':
+            return [media_path for media_path, _ in without_srt]
+        if choice == '2':
+            return list(audio_files)
+        if choice == '3':
+            print("Operation cancelled.")
+            return None
+        print("Invalid choice. Please enter 1, 2, or 3.")
+
+def resolve_files_to_process(audio_files, with_srt, without_srt, model_name, skip_existing, force):
+    """
+    Determine which files to process based on CLI flags or interactive prompt.
+
+    Returns:
+        tuple: (files_to_process, skipped_count) or (None, 0) if cancelled.
+    """
+    if force:
+        return list(audio_files), 0
+
+    if skip_existing:
+        files_to_process = [media_path for media_path, _ in without_srt]
+        skipped = len(with_srt)
+        if not files_to_process:
+            print("All files skipped (SRT already exists).")
+        return files_to_process, skipped
+
+    files_to_process = prompt_batch_action(audio_files, with_srt, without_srt, model_name)
+    if files_to_process is None:
+        return None, 0
+    skipped = len(audio_files) - len(files_to_process)
+    return files_to_process, skipped
+
 def convert_to_wav(input_file, wav_path):
     """
     Extract audio from video/audio file and convert to WAV using ffmpeg.
@@ -129,6 +247,7 @@ def wav_to_subtitles(media_file, output_dir=None, generate_srt=True, generate_tx
     valid_audio = {'.wav', '.m4a', '.mp3', '.aac'}
     valid_video = {'.mp4', '.mov', '.avi', '.mkv', '.flv', '.webm', '.m4v', '.3gp'}
     temp_wav = None
+    output_dir_arg = output_dir
 
     # Determine output directory
     if output_dir is None:
@@ -152,9 +271,9 @@ def wav_to_subtitles(media_file, output_dir=None, generate_srt=True, generate_tx
 
     # Paths for outputs
     base_name = Path(media_file).stem
-    srt_file = os.path.join(output_dir, f"{base_name}.srt")
-    txt_file = os.path.join(output_dir, f"{base_name}.txt")
-    lrc_file = os.path.join(output_dir, f"{base_name}.lrc")
+    srt_file = str(get_srt_output_path(media_file, output_dir_arg))
+    txt_file = str(output_dir / f"{base_name}.txt")
+    lrc_file = str(output_dir / f"{base_name}.lrc")
 
     # Load Whisper
     print(f"Loading Whisper model ({model_name})...")
@@ -253,6 +372,17 @@ def main():
         default=None,
         help='Language code for transcription (e.g., en, zh, es, fr). If not specified, auto-detect.'
     )
+    batch_group = parser.add_mutually_exclusive_group()
+    batch_group.add_argument(
+        '--skip-existing',
+        action='store_true',
+        help='Skip media files that already have an SRT output (directory mode only)'
+    )
+    batch_group.add_argument(
+        '--force',
+        action='store_true',
+        help='Reprocess all files, overwriting existing SRT (directory mode only; skips prompt)'
+    )
     args = parser.parse_args()
 
     model_name = "large-v3" if args.large_v3 else "base"
@@ -287,33 +417,38 @@ def main():
         print(f"Scanning directory: {args.media_file}")
         if args.recursive:
             print("(including subdirectories)")
-        
+
         audio_files = find_audio_files(args.media_file, recursive=args.recursive)
-        
+
         if not audio_files:
             print("No audio files found in the specified directory.")
             sys.exit(1)
-        
-        # Display list of files to process
-        print(f"\nFound {len(audio_files)} audio file(s):")
-        for i, file in enumerate(audio_files, 1):
-            print(f"  {i}. {file}")
-        
-        # Ask for confirmation
-        print(f"\nAbout to process {len(audio_files)} file(s) using the '{model_name}' model.")
-        response = input("Continue? (y/n): ").strip().lower()
-        
-        if response not in ['y', 'yes']:
-            print("Operation cancelled.")
+
+        with_srt, without_srt = classify_media_files(audio_files, args.output)
+        print_batch_classification(audio_files, with_srt, without_srt)
+
+        files_to_process, skipped = resolve_files_to_process(
+            audio_files,
+            with_srt,
+            without_srt,
+            model_name,
+            skip_existing=args.skip_existing,
+            force=args.force,
+        )
+
+        if files_to_process is None:
             sys.exit(0)
-        
+
+        if not files_to_process:
+            sys.exit(0)
+
         # Process each file
-        print("\nStarting batch processing...\n")
+        print(f"\nStarting batch processing ({len(files_to_process)} file(s))...\n")
         successful = 0
         failed = 0
-        
-        for i, audio_file in enumerate(audio_files, 1):
-            print(f"[{i}/{len(audio_files)}] Processing: {audio_file}")
+
+        for i, audio_file in enumerate(files_to_process, 1):
+            print(f"[{i}/{len(files_to_process)}] Processing: {audio_file}")
             try:
                 wav_to_subtitles(
                     audio_file,
@@ -329,10 +464,12 @@ def main():
                 print(f"ERROR processing {audio_file}: {e}")
                 failed += 1
             print()  # Empty line for readability
-        
+
         # Summary
-        print(f"Batch processing complete!")
+        print("Batch processing complete!")
         print(f"Successfully processed: {successful}")
+        if skipped > 0:
+            print(f"Skipped (existing SRT): {skipped}")
         if failed > 0:
             print(f"Failed: {failed}")
     else:
